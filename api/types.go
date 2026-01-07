@@ -7,7 +7,6 @@ type Monitor struct {
 	Name             string    `json:"name"`
 	URL              string    `json:"url"`
 	CSSSelector      *string   `json:"css_selector,omitempty"`
-	RenderJS         bool      `json:"render_js"`
 	FrequencySeconds int       `json:"frequency_seconds"`
 	NotifyEmail      bool      `json:"notify_email"`
 	NotifyEmailAddr  *string   `json:"notify_email_address,omitempty"`
@@ -21,6 +20,8 @@ type ChangeEvent struct {
 	ID                uint64    `json:"id"`
 	MonitorID         uint64    `json:"monitor_id"`
 	RunID             uint64    `json:"run_id"`
+	HTTPStatusPrev    *int      `json:"http_status_prev,omitempty"`
+	HTTPStatusCurr    *int      `json:"http_status_curr,omitempty"`
 	HTMLPrev          *string   `json:"html_prev,omitempty"`
 	HTMLCurr          *string   `json:"html_curr,omitempty"`
 	ContentURL        *string   `json:"content_url,omitempty"`

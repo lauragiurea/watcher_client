@@ -151,7 +151,6 @@ func (mw *MainWindow) showAddMonitorDialog() {
 	freqEntry := widget.NewEntry()
 	freqEntry.SetText("300") // default 5 minutes
 
-	renderCheck := widget.NewCheck("Render JS (headless browser)", nil)
 	emailCheck := widget.NewCheck("Notify by email", nil)
 	emailCheck.SetChecked(true)
 
@@ -167,7 +166,6 @@ func (mw *MainWindow) showAddMonitorDialog() {
 			widget.NewFormItem("URL", urlEntry),
 			widget.NewFormItem("CSS selector", cssEntry),
 			widget.NewFormItem("Frequency (seconds)", freqEntry),
-			widget.NewFormItem("", renderCheck),
 			widget.NewFormItem("", emailCheck),
 			widget.NewFormItem("Notification email", emailAddrEntry),
 		},
@@ -207,7 +205,6 @@ func (mw *MainWindow) showAddMonitorDialog() {
 				Name:             name,
 				URL:              url,
 				CSSSelector:      css,
-				RenderJS:         renderCheck.Checked,
 				FrequencySeconds: freq,
 				NotifyEmail:      notifyEmail,
 				NotifyEmailAddr:  emailAddr,

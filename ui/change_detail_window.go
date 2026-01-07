@@ -33,7 +33,7 @@ func ShowChangeDetailWindow(a fyne.App, c api.ChangeEvent, m api.Monitor) {
 	screenshotScroll := container.NewScroll(buildScreenshotContent(c))
 	screenshotScroll.SetMinSize(contentSize)
 
-	loadAndShowDiff := func(prevURL, currURL *string) {
+	loadAndShowDiff := func(prevURL, currURL *string, diffOverride func(prevHTML, currHTML string) fyne.CanvasObject) {
 		prevHTML, errPrev := loadHTMLFromURL(prevURL)
 		currHTML, errCurr := loadHTMLFromURL(currURL)
 
@@ -78,29 +78,46 @@ func ShowChangeDetailWindow(a fyne.App, c api.ChangeEvent, m api.Monitor) {
 			currPtr = &currCopy
 		}
 
-		segments, err := buildDiffSegments(prevPtr, currPtr)
-		if err != nil {
-			msg := fmt.Sprintf("Failed to build HTML diff: %v", err)
-			updateDiffContentWith(func() fyne.CanvasObject {
-				label := widget.NewLabel(msg)
-				label.Wrapping = fyne.TextWrapWord
-				return label
-			})
-			updateDownloadsContentWith(func() fyne.CanvasObject {
-				return buildDownloadsTab(w, prevHTML, currHTML)
-			})
-			return
+		var diffObj fyne.CanvasObject
+		if diffOverride != nil {
+			diffObj = diffOverride(prevHTML, currHTML)
+		} else {
+			segments, err := buildDiffSegments(prevPtr, currPtr)
+			if err != nil {
+				msg := fmt.Sprintf("Failed to build HTML diff: %v", err)
+				updateDiffContentWith(func() fyne.CanvasObject {
+					label := widget.NewLabel(msg)
+					label.Wrapping = fyne.TextWrapWord
+					return label
+				})
+				updateDownloadsContentWith(func() fyne.CanvasObject {
+					return buildDownloadsTab(w, prevHTML, currHTML)
+				})
+				return
+			}
+			fmt.Printf("diff: built %d render segments\n", len(segments))
+			diffObj = renderDiffRichText(segments)
 		}
-		fmt.Printf("diff: built %d render segments\n", len(segments))
 		updateDiffContentWith(func() fyne.CanvasObject {
-			return renderDiffRichText(segments)
+			return diffObj
 		})
 		updateDownloadsContentWith(func() fyne.CanvasObject {
 			return buildDownloadsTab(w, prevHTML, currHTML)
 		})
 	}
 
-	loadAndShowDiff(c.HTMLPrev, c.HTMLCurr)
+	var statusDiffOverride func(prevHTML, currHTML string) fyne.CanvasObject
+	if c.HTTPStatusPrev != nil && c.HTTPStatusCurr != nil && *c.HTTPStatusPrev != *c.HTTPStatusCurr {
+		prevStatus := *c.HTTPStatusPrev
+		currStatus := *c.HTTPStatusCurr
+		statusDiffOverride = func(_, _ string) fyne.CanvasObject {
+			label := widget.NewLabel(fmt.Sprintf("HTTP status changed from %d to %d.", prevStatus, currStatus))
+			label.Wrapping = fyne.TextWrapWord
+			return label
+		}
+	}
+
+	loadAndShowDiff(c.HTMLPrev, c.HTMLCurr, statusDiffOverride)
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Text diff", diffScroll),

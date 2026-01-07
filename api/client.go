@@ -107,7 +107,6 @@ type CreateMonitorReq struct {
 	Name             string  `json:"name"`
 	URL              string  `json:"url"`
 	CSSSelector      *string `json:"css_selector,omitempty"`
-	RenderJS         bool    `json:"render_js"`
 	FrequencySeconds int     `json:"frequency_seconds"`
 	NotifyEmail      bool    `json:"notify_email"`
 	NotifyEmailAddr  string  `json:"notify_email_address"`
