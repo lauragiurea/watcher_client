@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
@@ -44,11 +43,7 @@ func ShowHistoryWindow(a fyne.App, client *api.Client, m api.Monitor) {
 		list.Refresh()
 	}
 
-	refreshBtn := widget.NewButton("Refresh", func() { refresh() })
-
-	content := container.NewBorder(refreshBtn, nil, nil, nil, list)
-
-	w.SetContent(content)
+	w.SetContent(list)
 	w.Resize(fyne.NewSize(600, 400))
 	w.Show()
 

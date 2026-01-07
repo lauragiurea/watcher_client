@@ -21,7 +21,8 @@ type ChangeEvent struct {
 	ID                uint64    `json:"id"`
 	MonitorID         uint64    `json:"monitor_id"`
 	RunID             uint64    `json:"run_id"`
-	TextDiffHTML      *string   `json:"text_diff_html,omitempty"`
+	HTMLPrev          *string   `json:"html_prev,omitempty"`
+	HTMLCurr          *string   `json:"html_curr,omitempty"`
 	ContentURL        *string   `json:"content_url,omitempty"`
 	HTMLSnapshotURL   *string   `json:"html_snapshot_url,omitempty"`
 	ScreenshotURL     *string   `json:"screenshot_url,omitempty"`

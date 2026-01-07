@@ -113,9 +113,21 @@ type CreateMonitorReq struct {
 	NotifyEmailAddr  string  `json:"notify_email_address"`
 }
 
+type UpdateMonitorReq struct {
+	FrequencySeconds int  `json:"frequency_seconds"`
+	Active           bool `json:"active"`
+}
+
 func (c *Client) CreateMonitor(req CreateMonitorReq) (*Monitor, error) {
 	var m Monitor
 	err := c.do("POST", "/api/monitors", req, &m)
+	return &m, err
+}
+
+func (c *Client) UpdateMonitor(id uint64, req UpdateMonitorReq) (*Monitor, error) {
+	var m Monitor
+	path := fmt.Sprintf("/api/monitors/%d", id)
+	err := c.do("PUT", path, req, &m)
 	return &m, err
 }
 

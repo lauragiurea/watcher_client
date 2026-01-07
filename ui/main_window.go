@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -33,6 +34,12 @@ func NewMainWindow(a fyne.App, client *api.Client) *MainWindow {
 		selectedIndex: -1,
 	}
 
+	var historyBtn *widget.Button
+	var detailsBtn *widget.Button
+	var deleteBtn *widget.Button
+
+	updateSelectionButtons := func() {}
+
 	mw.list = widget.NewList(
 		func() int { return len(mw.monitors) },
 		func() fyne.CanvasObject {
@@ -41,32 +48,29 @@ func NewMainWindow(a fyne.App, client *api.Client) *MainWindow {
 		func(i widget.ListItemID, o fyne.CanvasObject) {
 			m := mw.monitors[i]
 			label := o.(*widget.Label)
-			label.SetText(m.Name + " (" + m.URL + ")")
+			text := fmt.Sprintf("%s (%s)", m.Name, m.URL)
+			if !m.Active {
+				text += " [inactive]"
+			}
+			label.SetText(text)
 		},
 	)
 
 	mw.list.OnSelected = func(id widget.ListItemID) {
 		mw.selectedIndex = int(id)
-		if id < 0 || id >= widget.ListItemID(len(mw.monitors)) {
-			return
-		}
-		m := mw.monitors[id]
-		mw.showMonitorDetails(m)
+		updateSelectionButtons()
 	}
 
 	mw.list.OnUnselected = func(id widget.ListItemID) {
 		if mw.selectedIndex == int(id) {
 			mw.selectedIndex = -1
 		}
+		updateSelectionButtons()
 	}
-
-	refreshBtn := widget.NewButton("Refresh", func() {
-		mw.loadMonitors()
-	})
 	addBtn := widget.NewButton("Add monitor", func() {
 		mw.showAddMonitorDialog()
 	})
-	delBtn := widget.NewButton("Delete selected", func() {
+	deleteBtn = widget.NewButton("Delete", func() {
 		if mw.selectedIndex < 0 || mw.selectedIndex >= len(mw.monitors) {
 			mw.showInfo("No monitor selected")
 			return
@@ -75,7 +79,7 @@ func NewMainWindow(a fyne.App, client *api.Client) *MainWindow {
 		mw.confirmDelete(m)
 	})
 
-	historyBtn := widget.NewButton("History", func() {
+	historyBtn = widget.NewButton("History", func() {
 		if mw.selectedIndex < 0 || mw.selectedIndex >= len(mw.monitors) {
 			mw.showInfo("No monitor selected")
 			return
@@ -83,14 +87,40 @@ func NewMainWindow(a fyne.App, client *api.Client) *MainWindow {
 		m := mw.monitors[mw.selectedIndex]
 		ShowHistoryWindow(mw.App, mw.Client, m)
 	})
+	detailsBtn = widget.NewButton("Edit", func() {
+		if mw.selectedIndex < 0 || mw.selectedIndex >= len(mw.monitors) {
+			mw.showInfo("No monitor selected")
+			return
+		}
+		m := mw.monitors[mw.selectedIndex]
+		mw.showMonitorDetails(m, mw.selectedIndex)
+	})
 
-	topBar := container.NewHBox(refreshBtn, addBtn, delBtn, historyBtn)
+	historyBtn.Disable()
+	detailsBtn.Disable()
+	deleteBtn.Disable()
+
+	updateSelectionButtons = func() {
+		hasSelection := mw.selectedIndex >= 0 && mw.selectedIndex < len(mw.monitors)
+		if hasSelection {
+			historyBtn.Enable()
+			detailsBtn.Enable()
+			deleteBtn.Enable()
+		} else {
+			historyBtn.Disable()
+			detailsBtn.Disable()
+			deleteBtn.Disable()
+		}
+	}
+
+	topBar := container.NewHBox(addBtn, deleteBtn, historyBtn, detailsBtn)
 	content := container.NewBorder(topBar, nil, nil, nil, mw.list)
 
 	w.SetContent(content)
 	w.Resize(fyne.NewSize(900, 600))
 
 	mw.loadMonitors()
+	updateSelectionButtons()
 	return mw
 }
 
@@ -217,6 +247,47 @@ func (mw *MainWindow) confirmDelete(m api.Monitor) {
 	)
 }
 
-func (mw *MainWindow) showMonitorDetails(m api.Monitor) {
-	mw.showInfo("Monitor: " + m.Name + "\nURL: " + m.URL)
+func (mw *MainWindow) showMonitorDetails(m api.Monitor, index int) {
+	freqEntry := widget.NewEntry()
+	freqEntry.SetText(strconv.Itoa(m.FrequencySeconds))
+
+	activeCheck := widget.NewCheck("Monitor is active", nil)
+	activeCheck.SetChecked(m.Active)
+
+	form := dialog.NewForm(
+		"Monitor details – "+m.Name,
+		"Save",
+		"Cancel",
+		[]*widget.FormItem{
+			widget.NewFormItem("Frequency (seconds)", freqEntry),
+			widget.NewFormItem("", activeCheck),
+		},
+		func(confirmed bool) {
+			if !confirmed {
+				return
+			}
+			freq, err := strconv.Atoi(strings.TrimSpace(freqEntry.Text))
+			if err != nil || freq <= 0 {
+				mw.showError("Please enter a valid positive frequency (seconds)")
+				return
+			}
+
+			req := api.UpdateMonitorReq{
+				FrequencySeconds: freq,
+				Active:           activeCheck.Checked,
+			}
+
+			updated, err := mw.Client.UpdateMonitor(m.ID, req)
+			if err != nil {
+				mw.showError("Update failed: " + err.Error())
+				return
+			}
+
+			mw.monitors[index] = *updated
+			mw.list.Refresh()
+		},
+		mw.Window,
+	)
+	form.Resize(fyne.NewSize(350, 220))
+	form.Show()
 }
