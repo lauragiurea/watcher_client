@@ -4,50 +4,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/storage"
-	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
-	"github.com/sergi/go-diff/diffmatchpatch"
 
 	"watcher-client/api"
-)
-
-type diffSegment struct {
-	text  string
-	style widget.RichTextStyle
-}
-
-const (
-	diffKindInserted = "inserted"
-	diffKindDeleted  = "deleted"
-	diffKindReplaced = "replaced"
-	plainDiffContext = 80
-)
-
-var (
-	diffPlainStyle = widget.RichTextStyle{}
-	diffStyleMap   = map[string]widget.RichTextStyle{
-		diffKindInserted: {
-			TextStyle: fyne.TextStyle{Bold: true},
-			ColorName: theme.ColorNameSuccess,
-		},
-		diffKindDeleted: {
-			TextStyle: fyne.TextStyle{Italic: true},
-			ColorName: theme.ColorNameError,
-		},
-		diffKindReplaced: {
-			TextStyle: fyne.TextStyle{
-				Bold:   true,
-				Italic: true,
-			},
-			ColorName: theme.ColorNameWarning,
-		},
-	}
 )
 
 func ShowChangeDetailWindow(a fyne.App, c api.ChangeEvent, m api.Monitor) {
@@ -60,6 +26,10 @@ func ShowChangeDetailWindow(a fyne.App, c api.ChangeEvent, m api.Monitor) {
 	diffScroll := container.NewScroll(diffContentHolder)
 	diffScroll.SetMinSize(contentSize)
 
+	downloadsContentHolder := container.NewStack(widget.NewLabel("Loading downloads…"))
+	downloadsScroll := container.NewScroll(downloadsContentHolder)
+	downloadsScroll.SetMinSize(contentSize)
+
 	screenshotScroll := container.NewScroll(buildScreenshotContent(c))
 	screenshotScroll.SetMinSize(contentSize)
 
@@ -67,13 +37,15 @@ func ShowChangeDetailWindow(a fyne.App, c api.ChangeEvent, m api.Monitor) {
 		prevHTML, errPrev := loadHTMLFromURL(prevURL)
 		currHTML, errCurr := loadHTMLFromURL(currURL)
 
-		updateContentWith := func(build func() fyne.CanvasObject) {
-			apply := func() {
-				obj := build()
-				diffContentHolder.Objects = []fyne.CanvasObject{obj}
-				diffContentHolder.Refresh()
-			}
-			apply()
+		updateDiffContentWith := func(build func() fyne.CanvasObject) {
+			obj := build()
+			diffContentHolder.Objects = []fyne.CanvasObject{obj}
+			diffContentHolder.Refresh()
+		}
+		updateDownloadsContentWith := func(build func() fyne.CanvasObject) {
+			obj := build()
+			downloadsContentHolder.Objects = []fyne.CanvasObject{obj}
+			downloadsContentHolder.Refresh()
 		}
 
 		if errPrev != nil || errCurr != nil {
@@ -84,10 +56,13 @@ func ShowChangeDetailWindow(a fyne.App, c api.ChangeEvent, m api.Monitor) {
 			if errCurr != nil {
 				msg += fmt.Sprintf("\nCurr: %v", errCurr)
 			}
-			updateContentWith(func() fyne.CanvasObject {
+			updateDiffContentWith(func() fyne.CanvasObject {
 				label := widget.NewLabel(msg)
 				label.Wrapping = fyne.TextWrapWord
 				return label
+			})
+			updateDownloadsContentWith(func() fyne.CanvasObject {
+				return buildDownloadsTab(w, "", "")
 			})
 			return
 		}
@@ -106,16 +81,22 @@ func ShowChangeDetailWindow(a fyne.App, c api.ChangeEvent, m api.Monitor) {
 		segments, err := buildDiffSegments(prevPtr, currPtr)
 		if err != nil {
 			msg := fmt.Sprintf("Failed to build HTML diff: %v", err)
-			updateContentWith(func() fyne.CanvasObject {
+			updateDiffContentWith(func() fyne.CanvasObject {
 				label := widget.NewLabel(msg)
 				label.Wrapping = fyne.TextWrapWord
 				return label
 			})
+			updateDownloadsContentWith(func() fyne.CanvasObject {
+				return buildDownloadsTab(w, prevHTML, currHTML)
+			})
 			return
 		}
 		fmt.Printf("diff: built %d render segments\n", len(segments))
-		updateContentWith(func() fyne.CanvasObject {
+		updateDiffContentWith(func() fyne.CanvasObject {
 			return renderDiffRichText(segments)
+		})
+		updateDownloadsContentWith(func() fyne.CanvasObject {
+			return buildDownloadsTab(w, prevHTML, currHTML)
 		})
 	}
 
@@ -124,98 +105,13 @@ func ShowChangeDetailWindow(a fyne.App, c api.ChangeEvent, m api.Monitor) {
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Text diff", diffScroll),
 		container.NewTabItem("Screenshots", screenshotScroll),
+		container.NewTabItem("Downloads", downloadsScroll),
 	)
 	tabs.SetTabLocation(container.TabLocationTop)
 
 	w.SetContent(tabs)
 	w.Resize(detailSize)
 	w.Show()
-}
-
-func buildDiffSegments(prevHTML, currHTML *string) ([]diffSegment, error) {
-	if (prevHTML == nil || *prevHTML == "") && (currHTML == nil || *currHTML == "") {
-		return nil, nil
-	}
-
-	prev := ""
-	if prevHTML != nil {
-		prev = *prevHTML
-	}
-	curr := ""
-	if currHTML != nil {
-		curr = *currHTML
-	}
-
-	segments := buildPlainDiffSegments(prev, curr)
-	return segments, nil
-}
-
-func buildPlainDiffSegments(prev, curr string) []diffSegment {
-	dmp := diffmatchpatch.New()
-	diffs := dmp.DiffMain(prev, curr, false)
-	dmp.DiffCleanupSemantic(diffs)
-
-	var segments []diffSegment
-	for i, d := range diffs {
-		switch d.Type {
-		case diffmatchpatch.DiffEqual:
-			prevChange := i > 0 && diffs[i-1].Type != diffmatchpatch.DiffEqual
-			nextChange := i < len(diffs)-1 && diffs[i+1].Type != diffmatchpatch.DiffEqual
-			if !(prevChange || nextChange) {
-				continue
-			}
-			text := d.Text
-			if len(text) > plainDiffContext*2 {
-				head := text[:plainDiffContext]
-				tail := text[len(text)-plainDiffContext:]
-				text = head + "\n... unchanged ...\n" + tail
-			}
-			segments = append(segments, diffSegment{
-				text:  text,
-				style: diffPlainStyle,
-			})
-		case diffmatchpatch.DiffInsert:
-			segments = append(segments, diffSegment{
-				text:  d.Text,
-				style: diffStyleMap[diffKindInserted],
-			})
-		case diffmatchpatch.DiffDelete:
-			segments = append(segments, diffSegment{
-				text:  d.Text,
-				style: diffStyleMap[diffKindDeleted],
-			})
-		}
-	}
-
-	return segments
-}
-
-func renderDiffRichText(segments []diffSegment) *widget.RichText {
-	if len(segments) == 0 {
-		return widget.NewRichTextFromMarkdown("_No diff available_")
-	}
-
-	rtSegments := make([]widget.RichTextSegment, 0, len(segments))
-	for _, seg := range segments {
-		if seg.text == "" {
-			continue
-		}
-		txt := seg.text
-		style := seg.style
-		rtSegments = append(rtSegments, &widget.TextSegment{
-			Text:  txt,
-			Style: style,
-		})
-	}
-
-	if len(rtSegments) == 0 {
-		return widget.NewRichTextFromMarkdown("_No diff available_")
-	}
-
-	fmt.Printf("diff: creating RichText with %d segments\n", len(rtSegments))
-	diffText := widget.NewRichText(rtSegments...)
-	diffText.Wrapping = fyne.TextWrapWord
-	return diffText
 }
 
 func loadHTMLFromURL(urlPtr *string) (string, error) {
@@ -247,30 +143,53 @@ func loadHTMLFromURL(urlPtr *string) (string, error) {
 	return string(body), nil
 }
 
-func buildScreenshotContent(c api.ChangeEvent) fyne.CanvasObject {
-	imgs := []fyne.CanvasObject{}
+func buildDownloadsTab(w fyne.Window, prevHTML, currHTML string) fyne.CanvasObject {
+	rows := []fyne.CanvasObject{
+		buildDownloadRow(w, "Previous HTML", "previous.html", prevHTML),
+		buildDownloadRow(w, "Current HTML", "current.html", currHTML),
+	}
+	return container.NewVBox(rows...)
+}
 
-	addImage := func(label string, urlPtr *string) {
-		if urlPtr == nil || *urlPtr == "" {
-			return
-		}
-		uri, err := storage.ParseURI(*urlPtr)
-		if err != nil {
-			return
-		}
-		img := canvas.NewImageFromURI(uri)
-		img.FillMode = canvas.ImageFillContain
-		box := container.NewBorder(widget.NewLabel(label), nil, nil, nil, img)
-		imgs = append(imgs, box)
+func buildDownloadRow(w fyne.Window, label, defaultFile string, content string) fyne.CanvasObject {
+	text := widget.NewLabel(label)
+	text.Wrapping = fyne.TextWrapWord
+
+	var action fyne.CanvasObject
+	if content == "" {
+		action = widget.NewLabel("Unavailable")
+	} else {
+		btn := widget.NewButton("Download", func() {
+			autoSaveToDownloads(w, defaultFile, content)
+		})
+		action = btn
 	}
 
-	addImage("Current", c.ScreenshotURL)
-	addImage("Previous", c.ScreenshotPrevURL)
-	addImage("Diff", c.ScreenshotDiffURL)
+	return container.NewBorder(nil, nil, nil, action, text)
+}
 
-	if len(imgs) == 0 {
-		return widget.NewLabel("No screenshots available")
+func autoSaveToDownloads(win fyne.Window, defaultName string, content string) {
+	if content == "" {
+		dialog.ShowInformation("Download HTML", "No HTML content available.", win)
+		return
 	}
 
-	return container.NewVBox(imgs...)
+	downloadsPath, err := os.UserHomeDir()
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("failed to locate home directory: %w", err), win)
+		return
+	}
+	downloadsPath = filepath.Join(downloadsPath, "Downloads")
+	if err := os.MkdirAll(downloadsPath, 0o755); err != nil {
+		dialog.ShowError(fmt.Errorf("failed to create downloads directory: %w", err), win)
+		return
+	}
+
+	destPath := filepath.Join(downloadsPath, defaultName)
+	if err := os.WriteFile(destPath, []byte(content), 0o644); err != nil {
+		dialog.ShowError(fmt.Errorf("failed to save file: %w", err), win)
+		return
+	}
+
+	dialog.ShowInformation("Download complete", fmt.Sprintf("Saved to %s", destPath), win)
 }
