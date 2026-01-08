@@ -17,17 +17,16 @@ type Monitor struct {
 }
 
 type ChangeEvent struct {
-	ID                uint64    `json:"id"`
-	MonitorID         uint64    `json:"monitor_id"`
-	RunID             uint64    `json:"run_id"`
-	HTTPStatusPrev    *int      `json:"http_status_prev,omitempty"`
-	HTTPStatusCurr    *int      `json:"http_status_curr,omitempty"`
-	HTMLPrev          *string   `json:"html_prev,omitempty"`
-	HTMLCurr          *string   `json:"html_curr,omitempty"`
-	ContentURL        *string   `json:"content_url,omitempty"`
-	HTMLSnapshotURL   *string   `json:"html_snapshot_url,omitempty"`
-	ScreenshotURL     *string   `json:"screenshot_url,omitempty"`
-	ScreenshotPrevURL *string   `json:"screenshot_prev_url,omitempty"`
-	ScreenshotDiffURL *string   `json:"screenshot_diff_url,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID             uint64    `json:"id"`
+	MonitorID      uint64    `json:"monitor_id"`
+	RunID          uint64    `json:"run_id"`
+	HTTPStatusPrev *int      `json:"http_status_prev,omitempty"`
+	HTTPStatusCurr *int      `json:"http_status_curr,omitempty"`
+	HTMLPrev       *string   `json:"html_prev,omitempty"`
+	HTMLCurr       *string   `json:"html_curr,omitempty"`
+	HTMLDiff       *string   `json:"html_diff,omitempty"`
+	ScreenshotCurr *string   `json:"screenshot_curr,omitempty"`
+	ScreenshotPrev *string   `json:"screenshot_prev,omitempty"`
+	ScreenshotDiff *string   `json:"screenshot_diff,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }

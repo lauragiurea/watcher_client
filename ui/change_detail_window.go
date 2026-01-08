@@ -30,8 +30,7 @@ func ShowChangeDetailWindow(a fyne.App, c api.ChangeEvent, m api.Monitor) {
 	downloadsScroll := container.NewScroll(downloadsContentHolder)
 	downloadsScroll.SetMinSize(contentSize)
 
-	screenshotScroll := container.NewScroll(buildScreenshotContent(c))
-	screenshotScroll.SetMinSize(contentSize)
+	screenshotContent := buildScreenshotContent(c)
 
 	loadAndShowDiff := func(prevURL, currURL *string, diffOverride func(prevHTML, currHTML string) fyne.CanvasObject) {
 		prevHTML, errPrev := loadHTMLFromURL(prevURL)
@@ -62,47 +61,22 @@ func ShowChangeDetailWindow(a fyne.App, c api.ChangeEvent, m api.Monitor) {
 				return label
 			})
 			updateDownloadsContentWith(func() fyne.CanvasObject {
-				return buildDownloadsTab(w, "", "")
+				return buildDownloadsTab(w, "", "", c)
 			})
 			return
-		}
-
-		var prevPtr *string
-		if prevURL != nil && *prevURL != "" {
-			prevCopy := prevHTML
-			prevPtr = &prevCopy
-		}
-		var currPtr *string
-		if currURL != nil && *currURL != "" {
-			currCopy := currHTML
-			currPtr = &currCopy
 		}
 
 		var diffObj fyne.CanvasObject
 		if diffOverride != nil {
 			diffObj = diffOverride(prevHTML, currHTML)
 		} else {
-			segments, err := buildDiffSegments(prevPtr, currPtr)
-			if err != nil {
-				msg := fmt.Sprintf("Failed to build HTML diff: %v", err)
-				updateDiffContentWith(func() fyne.CanvasObject {
-					label := widget.NewLabel(msg)
-					label.Wrapping = fyne.TextWrapWord
-					return label
-				})
-				updateDownloadsContentWith(func() fyne.CanvasObject {
-					return buildDownloadsTab(w, prevHTML, currHTML)
-				})
-				return
-			}
-			fmt.Printf("diff: built %d render segments\n", len(segments))
-			diffObj = renderDiffRichText(segments)
+			diffObj = buildHTMLDiffView(c.HTMLDiff)
 		}
 		updateDiffContentWith(func() fyne.CanvasObject {
 			return diffObj
 		})
 		updateDownloadsContentWith(func() fyne.CanvasObject {
-			return buildDownloadsTab(w, prevHTML, currHTML)
+			return buildDownloadsTab(w, prevHTML, currHTML, c)
 		})
 	}
 
@@ -121,7 +95,7 @@ func ShowChangeDetailWindow(a fyne.App, c api.ChangeEvent, m api.Monitor) {
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Text diff", diffScroll),
-		container.NewTabItem("Screenshots", screenshotScroll),
+		container.NewTabItem("Screenshots", screenshotContent),
 		container.NewTabItem("Downloads", downloadsScroll),
 	)
 	tabs.SetTabLocation(container.TabLocationTop)
@@ -160,10 +134,12 @@ func loadHTMLFromURL(urlPtr *string) (string, error) {
 	return string(body), nil
 }
 
-func buildDownloadsTab(w fyne.Window, prevHTML, currHTML string) fyne.CanvasObject {
+func buildDownloadsTab(w fyne.Window, prevHTML, currHTML string, c api.ChangeEvent) fyne.CanvasObject {
 	rows := []fyne.CanvasObject{
 		buildDownloadRow(w, "Previous HTML", "previous.html", prevHTML),
 		buildDownloadRow(w, "Current HTML", "current.html", currHTML),
+		buildRemoteDownloadRow(w, "Current screenshot", "current.png", c.ScreenshotCurr),
+		buildRemoteDownloadRow(w, "Previous screenshot", "previous.png", c.ScreenshotPrev),
 	}
 	return container.NewVBox(rows...)
 }
@@ -185,12 +161,61 @@ func buildDownloadRow(w fyne.Window, label, defaultFile string, content string) 
 	return container.NewBorder(nil, nil, nil, action, text)
 }
 
+func buildRemoteDownloadRow(w fyne.Window, label, defaultFile string, urlPtr *string) fyne.CanvasObject {
+	text := widget.NewLabel(label)
+	text.Wrapping = fyne.TextWrapWord
+
+	var action fyne.CanvasObject
+	if urlPtr == nil || *urlPtr == "" {
+		action = widget.NewLabel("Unavailable")
+	} else {
+		urlCopy := *urlPtr
+		action = widget.NewButton("Download", func() {
+			downloadAndSaveRemoteFile(w, defaultFile, urlCopy)
+		})
+	}
+
+	return container.NewBorder(nil, nil, nil, action, text)
+}
+
 func autoSaveToDownloads(win fyne.Window, defaultName string, content string) {
 	if content == "" {
 		dialog.ShowInformation("Download HTML", "No HTML content available.", win)
 		return
 	}
 
+	saveBytesToDownloads(win, defaultName, []byte(content))
+}
+
+func downloadAndSaveRemoteFile(win fyne.Window, defaultName string, url string) {
+	if url == "" {
+		dialog.ShowInformation("Download asset", "No asset available for download.", win)
+		return
+	}
+
+	client := &http.Client{Timeout: 45 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("failed to download asset: %w", err), win)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		dialog.ShowError(fmt.Errorf("asset download returned HTTP %d", resp.StatusCode), win)
+		return
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("failed to read asset response: %w", err), win)
+		return
+	}
+
+	saveBytesToDownloads(win, defaultName, data)
+}
+
+func saveBytesToDownloads(win fyne.Window, defaultName string, data []byte) {
 	downloadsPath, err := os.UserHomeDir()
 	if err != nil {
 		dialog.ShowError(fmt.Errorf("failed to locate home directory: %w", err), win)
@@ -203,7 +228,7 @@ func autoSaveToDownloads(win fyne.Window, defaultName string, content string) {
 	}
 
 	destPath := filepath.Join(downloadsPath, defaultName)
-	if err := os.WriteFile(destPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(destPath, data, 0o644); err != nil {
 		dialog.ShowError(fmt.Errorf("failed to save file: %w", err), win)
 		return
 	}
